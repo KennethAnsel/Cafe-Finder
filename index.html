@@ -15,23 +15,29 @@
   <div class="page-shell">
     <header class="hero">
       <div class="hero-copy">
-        <p class="eyebrow">Local discovery, refined</p>
+        <p class="eyebrow">Easy cafe finder</p>
         <h1>Cafe Curator</h1>
         <p class="hero-text">
-          Discover photogenic cafes around you, review the details quickly,
-          and save the spots worth revisiting.
+          Find nearby cafes in a simple and fun way. Check the place, see useful
+          details, and save the cafes you want to visit later.
         </p>
+        <div class="hero-points">
+          <p>Simple enough for students and beginners</p>
+          <p>Swipe or use buttons to choose quickly</p>
+          <p>Save your favorite cafes in one click</p>
+        </div>
       </div>
 
       <section class="control-panel">
         <div class="actions">
           <button class="primary-button" onclick="getLocationCachedOrNew()">Find Cafes Near Me</button>
-          <button class="secondary-button" onclick="showSaved()">Show Saved Cafes</button>
+          <button class="secondary-button" onclick="showSaved()">My Saved Cafes</button>
         </div>
+        <p class="helper-text">Tip: click the first button to load cafes near your current location.</p>
 
         <div class="toolbar">
           <label class="field">
-            <span>Search Radius</span>
+            <span>Search Distance</span>
             <select id="radius-select">
               <option value="1500">1.5 km</option>
               <option value="3000">3 km</option>
@@ -39,12 +45,23 @@
               <option value="8000">8 km</option>
             </select>
           </label>
-          <button class="ghost-button" onclick="refreshCurrentSearch()">Refresh Results</button>
+          <button class="ghost-button" onclick="refreshCurrentSearch()">Refresh List</button>
         </div>
 
         <div class="meta-row">
           <p id="status" class="status-pill" aria-live="polite">Ready to explore nearby cafes.</p>
           <p id="saved-count" class="saved-chip">0 saved</p>
+        </div>
+
+        <div class="stats-grid">
+          <article class="stat-card">
+            <span>Cards Left</span>
+            <strong id="deck-count">0</strong>
+          </article>
+          <article class="stat-card">
+            <span>Current Mode</span>
+            <strong id="view-mode">Ready</strong>
+          </article>
         </div>
       </section>
     </header>
@@ -52,8 +69,8 @@
     <main class="app-grid">
       <section class="deck-column">
         <div class="section-heading">
-          <p class="section-label">Swipe Deck</p>
-          <h2>Nearby Matches</h2>
+          <p class="section-label">Cafe Cards</p>
+          <h2>Nearby Cafes</h2>
         </div>
         <div class="cards"></div>
         <div class="deck-actions">
@@ -65,28 +82,29 @@
       <aside class="info-column">
         <div class="info-card">
           <p class="section-label">How It Works</p>
-          <h3>Fast decisions, less tab switching</h3>
+          <h3>Easy to use</h3>
           <p>
-            Swipe left to skip. Swipe right to save. When Google Places is connected,
-            cards include real photos, addresses, ratings, and a direct Maps link.
+            Swipe left to skip a cafe. Swipe right to save it. You can also use the
+            Skip and Save buttons if you do not want to swipe.
           </p>
         </div>
 
         <div class="info-card">
-          <p class="section-label">Pro Tip</p>
-          <h3>Use a Google Maps API key</h3>
+          <p class="section-label">Extra Feature</p>
+          <h3>Add Google Maps for better data</h3>
           <p>
-            Add your key in <code>script.js</code> to unlock Google place photos and
-            richer cafe details. Without it, the app falls back to limited open data.
+            Add your API key in <code>script.js</code> if you want better photos,
+            ratings, and richer cafe details. Without it, the app still works with
+            basic open data.
           </p>
         </div>
 
         <div class="info-card">
           <p class="section-label">Saved List</p>
-          <h3>Keep it tidy</h3>
+          <h3>Keep your shortlist clean</h3>
           <p>
-            Open your saved cafes anytime, remove the ones you no longer want,
-            or clear the full shortlist when you want a fresh start.
+            Open your saved cafes anytime, remove the ones you do not need, or
+            clear everything and start fresh.
           </p>
           <button class="ghost-button" onclick="clearSavedCafes()">Clear Saved Cafes</button>
         </div>
