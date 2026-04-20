@@ -4,22 +4,68 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cafe Curator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>C</text></svg>">
-  <link href="https://fonts.googleapis.com/css2?family=Savate:ital,wght@0,200..900;1,200..900&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <h1>Cafe Curator</h1>
-  <p>Find and save the best cafes near you.</p>
+  <div class="page-shell">
+    <header class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">Local discovery, refined</p>
+        <h1>Cafe Curator</h1>
+        <p class="hero-text">
+          Discover photogenic cafes around you, review the details quickly,
+          and save the spots worth revisiting.
+        </p>
+      </div>
 
-  <div class="actions">
-    <button onclick="getLocationCachedOrNew()">Find Cafes Near Me</button>
-    <button onclick="showSaved()">Show Saved Cafes</button>
+      <section class="control-panel">
+        <div class="actions">
+          <button class="primary-button" onclick="getLocationCachedOrNew()">Find Cafes Near Me</button>
+          <button class="secondary-button" onclick="showSaved()">Show Saved Cafes</button>
+        </div>
+
+        <div class="meta-row">
+          <p id="status" class="status-pill" aria-live="polite">Ready to explore nearby cafes.</p>
+          <p id="saved-count" class="saved-chip">0 saved</p>
+        </div>
+      </section>
+    </header>
+
+    <main class="app-grid">
+      <section class="deck-column">
+        <div class="section-heading">
+          <p class="section-label">Swipe Deck</p>
+          <h2>Nearby Matches</h2>
+        </div>
+        <div class="cards"></div>
+      </section>
+
+      <aside class="info-column">
+        <div class="info-card">
+          <p class="section-label">How It Works</p>
+          <h3>Fast decisions, less tab switching</h3>
+          <p>
+            Swipe left to skip. Swipe right to save. When Google Places is connected,
+            cards include real photos, addresses, ratings, and a direct Maps link.
+          </p>
+        </div>
+
+        <div class="info-card">
+          <p class="section-label">Pro Tip</p>
+          <h3>Use a Google Maps API key</h3>
+          <p>
+            Add your key in <code>script.js</code> to unlock Google place photos and
+            richer cafe details. Without it, the app falls back to limited open data.
+          </p>
+        </div>
+      </aside>
+    </main>
   </div>
-
-  <p id="status" aria-live="polite"></p>
-  <div class="cards"></div>
 
   <script src="script.js"></script>
 </body>

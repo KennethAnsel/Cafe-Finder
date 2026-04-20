@@ -1,8 +1,13 @@
+const GOOGLE_MAPS_API_KEY = "";
 const SEARCH_RADIUS = 5000;
 const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+const NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse";
 const LOCATION_CACHE_KEY = "cachedLocation";
 const SAVED_CAFES_KEY = "savedCafes";
 const LOCATION_CACHE_TTL = 10 * 60 * 1000;
+const GOOGLE_SCRIPT_ID = "google-maps-js";
+
+let googleMapsLoaderPromise;
 
 function getCardsContainer() {
   return document.querySelector(".cards");
@@ -12,10 +17,24 @@ function getStatusElement() {
   return document.getElementById("status");
 }
 
+function getSavedCountElement() {
+  return document.getElementById("saved-count");
+}
+
 function setStatus(message, isError = false) {
   const status = getStatusElement();
   status.textContent = message;
   status.classList.toggle("error", isError);
+}
+
+function updateSavedCount() {
+  const saved = JSON.parse(localStorage.getItem(SAVED_CAFES_KEY) || "[]");
+  const label = `${saved.length} saved`;
+  getSavedCountElement().textContent = label;
+}
+
+function hasGooglePlacesKey() {
+  return GOOGLE_MAPS_API_KEY.trim().length > 0;
 }
 
 function getLocationCachedOrNew() {
@@ -49,6 +68,129 @@ function getLocationCachedOrNew() {
 }
 
 async function useLocation(lat, lng) {
+  if (hasGooglePlacesKey()) {
+    await useGooglePlaces(lat, lng);
+    return;
+  }
+
+  setStatus(
+    "Using fallback data. Add a Google Maps API key in script.js for real cafe photos, full addresses, and ratings.",
+    true
+  );
+  await useOpenStreetMap(lat, lng);
+}
+
+async function useGooglePlaces(lat, lng) {
+  const container = getCardsContainer();
+  container.classList.remove("saved-view");
+  container.innerHTML = "";
+  setStatus("Finding top cafes near you with Google Places...");
+
+  try {
+    await loadGoogleMapsApi();
+    const { Place, SearchNearbyRankPreference } = await google.maps.importLibrary("places");
+
+    const request = {
+      fields: [
+        "id",
+        "displayName",
+        "formattedAddress",
+        "rating",
+        "userRatingCount",
+        "photos",
+        "googleMapsURI"
+      ],
+      locationRestriction: {
+        center: { lat, lng },
+        radius: SEARCH_RADIUS
+      },
+      includedPrimaryTypes: ["cafe"],
+      maxResultCount: 20,
+      rankPreference: SearchNearbyRankPreference.POPULARITY
+    };
+
+    const { places } = await Place.searchNearby(request);
+    const cafes = (places || []).map(normalizeGoogleCafe).filter(Boolean);
+
+    if (cafes.length === 0) {
+      setStatus("No cafes found in this area.");
+      return;
+    }
+
+    setStatus(`Found ${cafes.length} cafes with Google Places. Swipe right to save your favorites.`);
+    displayCards(cafes);
+  } catch (error) {
+    console.error("Error fetching Google Places data:", error);
+    setStatus("Google Places failed, so showing fallback cafe data instead.", true);
+    await useOpenStreetMap(lat, lng);
+  }
+}
+
+function loadGoogleMapsApi() {
+  if (window.google?.maps?.importLibrary) {
+    return Promise.resolve();
+  }
+
+  if (!hasGooglePlacesKey()) {
+    return Promise.reject(new Error("Missing Google Maps API key"));
+  }
+
+  if (googleMapsLoaderPromise) {
+    return googleMapsLoaderPromise;
+  }
+
+  googleMapsLoaderPromise = new Promise((resolve, reject) => {
+    const existingScript = document.getElementById(GOOGLE_SCRIPT_ID);
+
+    if (existingScript) {
+      existingScript.addEventListener("load", resolve, { once: true });
+      existingScript.addEventListener(
+        "error",
+        () => reject(new Error("Failed to load Google Maps script")),
+        { once: true }
+      );
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.id = GOOGLE_SCRIPT_ID;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}&v=weekly&libraries=places`;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Failed to load Google Maps script"));
+    document.head.appendChild(script);
+  });
+
+  return googleMapsLoaderPromise;
+}
+
+function normalizeGoogleCafe(place) {
+  if (!place?.id) {
+    return null;
+  }
+
+  const firstPhoto = place.photos?.[0];
+  const firstAttribution = firstPhoto?.authorAttributions?.[0];
+
+  return {
+    place_id: place.id,
+    name: place.displayName || "Cafe",
+    address: place.formattedAddress || "Address not available",
+    rating: typeof place.rating === "number" ? place.rating.toFixed(1) : "",
+    ratingCount: typeof place.userRatingCount === "number" ? place.userRatingCount : 0,
+    photo: firstPhoto ? firstPhoto.getURI({ maxHeight: 720, maxWidth: 1080 }) : "",
+    photoAttribution: firstAttribution
+      ? {
+          displayName: firstAttribution.displayName,
+          uri: firstAttribution.uri
+        }
+      : null,
+    mapsUrl: place.googleMapsURI || ""
+  };
+}
+
+async function useOpenStreetMap(lat, lng) {
   const query = `
     [out:json][timeout:25];
     (
@@ -62,7 +204,7 @@ async function useLocation(lat, lng) {
   const container = getCardsContainer();
   container.classList.remove("saved-view");
   container.innerHTML = "";
-  setStatus("Finding cafes near you...");
+  setStatus("Finding cafes near you with limited fallback data...", true);
 
   try {
     const response = await fetch(OVERPASS_URL, {
@@ -78,14 +220,14 @@ async function useLocation(lat, lng) {
     }
 
     const data = await response.json();
-    const cafes = normalizeCafes(data.elements || []);
+    const cafes = await enrichCafes(normalizeFallbackCafes(data.elements || []));
 
     if (cafes.length === 0) {
       setStatus("No cafes found in this area.");
       return;
     }
 
-    setStatus(`Found ${cafes.length} cafes. Swipe right to save your favorites.`);
+    setStatus(`Found ${cafes.length} cafes. Photos and ratings will improve once a Google Maps API key is added.`, true);
     displayCards(cafes);
   } catch (error) {
     console.error("Error fetching nearby cafes:", error);
@@ -93,7 +235,7 @@ async function useLocation(lat, lng) {
   }
 }
 
-function normalizeCafes(elements) {
+function normalizeFallbackCafes(elements) {
   const mapped = elements
     .map((element) => {
       const tags = element.tags || {};
@@ -113,9 +255,12 @@ function normalizeCafes(elements) {
       return {
         place_id: `${element.type}-${element.id}`,
         name: tags.name,
-        address: addressParts.join(", ") || "Address not available",
-        rating: tags.stars || "N/A",
-        photo: `https://placehold.co/400x220?text=${encodeURIComponent(tags.name)}`,
+        address: addressParts.join(", "),
+        rating: "",
+        ratingCount: 0,
+        photo: getFallbackImageUrl(tags, tags.name),
+        photoAttribution: null,
+        mapsUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${cafeLat},${cafeLng}`)}`,
         lat: cafeLat,
         lng: cafeLng
       };
@@ -136,6 +281,98 @@ function normalizeCafes(elements) {
   return unique.slice(0, 20);
 }
 
+function getFallbackImageUrl(tags, name) {
+  if (tags.image) {
+    return tags.image;
+  }
+
+  if (tags["image:0"]) {
+    return tags["image:0"];
+  }
+
+  if (tags.wikimedia_commons) {
+    const fileName = tags.wikimedia_commons.replace(/^File:/i, "");
+    return `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(fileName)}`;
+  }
+
+  return `https://placehold.co/1080x720?text=${encodeURIComponent(name)}`;
+}
+
+async function enrichCafes(cafes) {
+  const enriched = await Promise.all(
+    cafes.map(async (cafe) => {
+      if (cafe.address) {
+        return cafe;
+      }
+
+      return {
+        ...cafe,
+        address: await fetchAddress(cafe.lat, cafe.lng)
+      };
+    })
+  );
+
+  return enriched;
+}
+
+async function fetchAddress(lat, lng) {
+  try {
+    const url = `${NOMINATIM_URL}?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;
+    const response = await fetch(url, {
+      headers: {
+        Accept: "application/json"
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Reverse geocode failed with status ${response.status}`);
+    }
+
+    const data = await response.json();
+    const address = data.address || {};
+    const addressParts = [
+      address.house_number,
+      address.road,
+      address.suburb || address.neighbourhood,
+      address.city || address.town || address.village
+    ].filter(Boolean);
+
+    return addressParts.join(", ") || "Address not available";
+  } catch (error) {
+    console.error("Error fetching address:", error);
+    return "Address not available";
+  }
+}
+
+function renderRating(rating) {
+  return rating ? `<p class="detail-line"><span>Rating</span><strong>${rating}</strong></p>` : "";
+}
+
+function renderRatingCount(ratingCount) {
+  return ratingCount ? `<p class="detail-line"><span>Reviews</span><strong>${ratingCount}</strong></p>` : "";
+}
+
+function renderPhoto(photoUrl, cafeName) {
+  const src = photoUrl || "https://placehold.co/1080x720?text=No+Image";
+  return `<img src="${src}" alt="${cafeName}" onerror="this.src='https://placehold.co/1080x720?text=No+Image'" />`;
+}
+
+function renderPhotoAttribution(photoAttribution) {
+  if (!photoAttribution?.displayName || !photoAttribution?.uri) {
+    return "";
+  }
+
+  return `<p class="photo-credit">Photo by <a href="${photoAttribution.uri}" target="_blank" rel="noopener noreferrer">${photoAttribution.displayName}</a></p>`;
+}
+
+function renderMapsLink(mapsUrl) {
+  if (!mapsUrl) {
+    return "";
+  }
+
+  return `<a class="maps-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">Open in Google Maps</a>`;
+}
+
 function displayCards(cafes) {
   const container = getCardsContainer();
   container.innerHTML = "";
@@ -145,14 +382,26 @@ function displayCards(cafes) {
     wrapper.className = "swipe-wrapper";
     wrapper.style.zIndex = 200 - index;
 
-    const card = document.createElement("div");
+    const card = document.createElement("article");
     card.className = "location-card";
     card.innerHTML = `
-      <img src="${cafe.photo}" alt="${cafe.name}" />
-      <h3>${cafe.name}</h3>
-      <p>${cafe.address}</p>
-      <p>Rating: ${cafe.rating}</p>
-      <p><small>Swipe right to save</small></p>
+      <div class="image-wrap">
+        ${renderPhoto(cafe.photo, cafe.name)}
+      </div>
+      <div class="card-body">
+        <div class="card-topline">
+          <p class="section-label">Cafe Pick</p>
+          ${renderMapsLink(cafe.mapsUrl)}
+        </div>
+        <h3>${cafe.name}</h3>
+        <p class="address">${cafe.address}</p>
+        <div class="detail-grid">
+          ${renderRating(cafe.rating)}
+          ${renderRatingCount(cafe.ratingCount)}
+        </div>
+        ${renderPhotoAttribution(cafe.photoAttribution)}
+        <p class="swipe-hint">Swipe right to save or left to move on.</p>
+      </div>
     `;
 
     wrapper.appendChild(card);
@@ -161,16 +410,16 @@ function displayCards(cafes) {
     const hammer = new Hammer(wrapper);
 
     hammer.on("swipeleft", () => {
-      wrapper.style.transform = "translateX(-150%) rotate(-15deg)";
+      wrapper.style.transform = "translateX(-150%) rotate(-12deg)";
       wrapper.style.opacity = "0";
-      setTimeout(() => wrapper.remove(), 150);
+      setTimeout(() => wrapper.remove(), 180);
     });
 
     hammer.on("swiperight", () => {
       saveCafe(cafe);
-      wrapper.style.transform = "translateX(150%) rotate(15deg)";
+      wrapper.style.transform = "translateX(150%) rotate(12deg)";
       wrapper.style.opacity = "0";
-      setTimeout(() => wrapper.remove(), 150);
+      setTimeout(() => wrapper.remove(), 180);
     });
   });
 }
@@ -185,6 +434,7 @@ function saveCafe(cafe) {
 
   saved.push(cafe);
   localStorage.setItem(SAVED_CAFES_KEY, JSON.stringify(saved));
+  updateSavedCount();
   setStatus(`${cafe.name} saved to your list.`);
 }
 
@@ -196,7 +446,7 @@ function showSaved() {
   container.innerHTML = "";
 
   if (saved.length === 0) {
-    container.innerHTML = '<p class="empty-state">No saved cafes yet.</p>';
+    container.innerHTML = '<p class="empty-state">No saved cafes yet. Start swiping to build your shortlist.</p>';
     setStatus("You haven't saved any cafes yet.");
     return;
   }
@@ -204,14 +454,28 @@ function showSaved() {
   setStatus(`Showing ${saved.length} saved cafes.`);
 
   saved.forEach((cafe) => {
-    const card = document.createElement("div");
-    card.className = "location-card";
+    const card = document.createElement("article");
+    card.className = "location-card saved-card";
     card.innerHTML = `
-      <img src="${cafe.photo}" alt="${cafe.name}" />
-      <h3>${cafe.name}</h3>
-      <p>${cafe.address}</p>
-      <p>Rating: ${cafe.rating}</p>
+      <div class="image-wrap">
+        ${renderPhoto(cafe.photo, cafe.name)}
+      </div>
+      <div class="card-body">
+        <div class="card-topline">
+          <p class="section-label">Saved Cafe</p>
+          ${renderMapsLink(cafe.mapsUrl)}
+        </div>
+        <h3>${cafe.name}</h3>
+        <p class="address">${cafe.address}</p>
+        <div class="detail-grid">
+          ${renderRating(cafe.rating)}
+          ${renderRatingCount(cafe.ratingCount)}
+        </div>
+        ${renderPhotoAttribution(cafe.photoAttribution)}
+      </div>
     `;
     container.appendChild(card);
   });
 }
+
+updateSavedCount();
