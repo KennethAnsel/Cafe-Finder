@@ -1,16 +1,16 @@
-const GOOGLE_MAPS_API_KEY = "";
 const SEARCH_RADIUS = 5000;
 const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse";
 const LOCATION_CACHE_KEY = "cachedLocation";
 const SAVED_CAFES_KEY = "savedCafes";
 const LOCATION_CACHE_TTL = 10 * 60 * 1000;
-const GOOGLE_SCRIPT_ID = "google-maps-js";
 
-let googleMapsLoaderPromise;
 let currentSearchLocation = null;
 let currentDeck = [];
 let currentViewMode = "Ready";
+let leafletMapInstance = null;
+let userLocationMarker = null;
+let cafeMarkers = [];
 
 function getCardsContainer() {
   return document.querySelector(".cards");
@@ -30,6 +30,10 @@ function getRadiusSelect() {
 
 function getDeckCountElement() {
   return document.getElementById("deck-count");
+}
+
+function getMapElement() {
+  return document.getElementById("map");
 }
 
 function getViewModeElement() {
@@ -61,10 +65,6 @@ function setViewMode(mode) {
   if (viewModeElement) {
     viewModeElement.textContent = mode;
   }
-}
-
-function hasGooglePlacesKey() {
-  return GOOGLE_MAPS_API_KEY.trim().length > 0;
 }
 
 function getSearchRadius() {
@@ -106,52 +106,16 @@ function getLocationCachedOrNew() {
 
 async function useLocation(lat, lng) {
   currentSearchLocation = { lat, lng };
-
-  if (hasGooglePlacesKey()) {
-    await useGooglePlaces(lat, lng);
-    return;
-  }
-
-  setStatus(
-    "Using basic fallback data. Add a Google Maps API key in script.js for better photos, addresses, and ratings.",
-    true
-  );
-  await useOpenStreetMap(lat, lng);
-}
-
-async function useGooglePlaces(lat, lng) {
   const container = getCardsContainer();
   container.classList.remove("saved-view");
   container.innerHTML = "";
-  setStatus("Finding nearby cafes with Google Maps...");
-  setViewMode("Live Search");
-  const radius = getSearchRadius();
+  setStatus("Loading nearby cafes...");
+  setViewMode("Loading");
 
   try {
-    await loadGoogleMapsApi();
-    const { Place, SearchNearbyRankPreference } = await google.maps.importLibrary("places");
-
-    const request = {
-      fields: [
-        "id",
-        "displayName",
-        "formattedAddress",
-        "rating",
-        "userRatingCount",
-        "photos",
-        "googleMapsURI"
-      ],
-      locationRestriction: {
-        center: { lat, lng },
-        radius
-      },
-      includedPrimaryTypes: ["cafe"],
-      maxResultCount: 20,
-      rankPreference: SearchNearbyRankPreference.POPULARITY
-    };
-
-    const { places } = await Place.searchNearby(request);
-    const cafes = (places || []).map(normalizeGoogleCafe).filter(Boolean);
+    initializeLeafletMap(lat, lng);
+    const cafes = await fetchNearbyCafes(lat, lng, getSearchRadius());
+    renderCafeMarkers(cafes);
 
     if (cafes.length === 0) {
       currentDeck = [];
@@ -167,129 +131,85 @@ async function useGooglePlaces(lat, lng) {
     setViewMode("Browsing");
     displayCards(cafes);
   } catch (error) {
-    console.error("Error fetching Google Places data:", error);
-    setStatus("Google Maps data could not load, so basic cafe data is shown instead.", true);
-    setViewMode("Fallback");
-    await useOpenStreetMap(lat, lng);
-  }
-}
-
-function loadGoogleMapsApi() {
-  if (window.google?.maps?.importLibrary) {
-    return Promise.resolve();
-  }
-
-  if (!hasGooglePlacesKey()) {
-    return Promise.reject(new Error("Missing Google Maps API key"));
-  }
-
-  if (googleMapsLoaderPromise) {
-    return googleMapsLoaderPromise;
-  }
-
-  googleMapsLoaderPromise = new Promise((resolve, reject) => {
-    const existingScript = document.getElementById(GOOGLE_SCRIPT_ID);
-
-    if (existingScript) {
-      existingScript.addEventListener("load", resolve, { once: true });
-      existingScript.addEventListener(
-        "error",
-        () => reject(new Error("Failed to load Google Maps script")),
-        { once: true }
-      );
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.id = GOOGLE_SCRIPT_ID;
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}&v=weekly&libraries=places`;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Failed to load Google Maps script"));
-    document.head.appendChild(script);
-  });
-
-  return googleMapsLoaderPromise;
-}
-
-function normalizeGoogleCafe(place) {
-  if (!place?.id) {
-    return null;
-  }
-
-  const firstPhoto = place.photos?.[0];
-  const firstAttribution = firstPhoto?.authorAttributions?.[0];
-
-  return {
-    place_id: place.id,
-    name: place.displayName || "Cafe",
-    address: place.formattedAddress || "Address not available",
-    rating: typeof place.rating === "number" ? place.rating.toFixed(1) : "",
-    ratingCount: typeof place.userRatingCount === "number" ? place.userRatingCount : 0,
-    photo: firstPhoto ? firstPhoto.getURI({ maxHeight: 720, maxWidth: 1080 }) : "",
-    photoAttribution: firstAttribution
-      ? {
-          displayName: firstAttribution.displayName,
-          uri: firstAttribution.uri
-        }
-      : null,
-    mapsUrl: place.googleMapsURI || ""
-  };
-}
-
-async function useOpenStreetMap(lat, lng) {
-  const radius = getSearchRadius();
-  const query = `
-    [out:json][timeout:25];
-    (
-      node["amenity"="cafe"](around:${radius},${lat},${lng});
-      way["amenity"="cafe"](around:${radius},${lat},${lng});
-      relation["amenity"="cafe"](around:${radius},${lat},${lng});
-    );
-    out center tags;
-  `;
-
-  const container = getCardsContainer();
-  container.classList.remove("saved-view");
-  container.innerHTML = "";
-  setStatus("Finding cafes near you with basic fallback data...", true);
-  setViewMode("Fallback");
-
-  try {
-    const response = await fetch(OVERPASS_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "text/plain;charset=UTF-8"
-      },
-      body: query
-    });
-
-    if (!response.ok) {
-      throw new Error(`Request failed with status ${response.status}`);
-    }
-
-    const data = await response.json();
-    const cafes = await enrichCafes(normalizeFallbackCafes(data.elements || []));
-
-    if (cafes.length === 0) {
-      currentDeck = [];
-      updateDeckCount();
-      setStatus("No cafes found in this area.");
-      setViewMode("No Results");
-      return;
-    }
-
-    currentDeck = cafes;
-    updateDeckCount();
-    setStatus(`Found ${cafes.length} cafes. Add a Google Maps API key for better photos and ratings.`, true);
-    setViewMode("Browsing");
-    displayCards(cafes);
-  } catch (error) {
-    console.error("Error fetching nearby cafes:", error);
-    setStatus("Couldn't load cafes right now. Please try again in a moment.", true);
+    console.error("Error loading nearby cafes:", error);
+    clearCafeMarkers();
+    setStatus("Cafe search failed. Please try again in a moment.", true);
     setViewMode("Error");
   }
+}
+
+function initializeLeafletMap(lat, lng) {
+  const mapElement = getMapElement();
+  if (!mapElement) {
+    throw new Error("Map element not found");
+  }
+
+  if (!leafletMapInstance) {
+    leafletMapInstance = L.map(mapElement).setView([lat, lng], 14);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19
+    }).addTo(leafletMapInstance);
+  } else {
+    leafletMapInstance.setView([lat, lng], 14);
+  }
+
+  if (!userLocationMarker) {
+    userLocationMarker = L.circleMarker([lat, lng], {
+      radius: 8,
+      color: "#ad3f22",
+      weight: 2,
+      fillColor: "#d86a37",
+      fillOpacity: 0.95
+    });
+    userLocationMarker.addTo(leafletMapInstance);
+  } else {
+    userLocationMarker.setLatLng([lat, lng]);
+  }
+}
+
+async function fetchNearbyCafes(lat, lon, radius) {
+  const query = `
+    [out:json][timeout:25];
+    node["amenity"="cafe"](around:${radius},${lat},${lon});
+    out body;
+  `;
+
+  const response = await fetch(OVERPASS_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "text/plain;charset=UTF-8"
+    },
+    body: query
+  });
+
+  if (!response.ok) {
+    throw new Error(`Overpass request failed with status ${response.status}`);
+  }
+
+  const data = await response.json();
+  const cafes = await enrichCafes(normalizeFallbackCafes(data.elements || []));
+  return cafes;
+}
+
+function clearCafeMarkers() {
+  cafeMarkers.forEach((marker) => marker.remove());
+  cafeMarkers = [];
+}
+
+function renderCafeMarkers(cafes) {
+  clearCafeMarkers();
+
+  cafes.forEach((cafe) => {
+    if (cafe.lat == null || cafe.lng == null || !leafletMapInstance) {
+      return;
+    }
+
+    const marker = L.marker([cafe.lat, cafe.lng], { title: cafe.name || "Cafe" });
+    marker.addTo(leafletMapInstance);
+    marker.bindPopup(cafe.name || "Cafe");
+    cafeMarkers.push(marker);
+  });
 }
 
 function normalizeFallbackCafes(elements) {
@@ -299,7 +219,7 @@ function normalizeFallbackCafes(elements) {
       const cafeLat = element.lat ?? element.center?.lat;
       const cafeLng = element.lon ?? element.center?.lon;
 
-      if (!tags.name || cafeLat == null || cafeLng == null) {
+      if (cafeLat == null || cafeLng == null) {
         return null;
       }
 
@@ -311,13 +231,13 @@ function normalizeFallbackCafes(elements) {
 
       return {
         place_id: `${element.type}-${element.id}`,
-        name: tags.name,
+        name: tags.name || "Cafe",
         address: addressParts.join(", "),
         rating: "",
         ratingCount: 0,
-        photo: getFallbackImageUrl(tags, tags.name),
+        photo: getFallbackImageUrl(tags, tags.name || "Cafe"),
         photoAttribution: null,
-        mapsUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${cafeLat},${cafeLng}`)}`,
+        mapsUrl: `https://www.openstreetmap.org/?mlat=${encodeURIComponent(cafeLat)}&mlon=${encodeURIComponent(cafeLng)}#map=18/${encodeURIComponent(cafeLat)}/${encodeURIComponent(cafeLng)}`,
         lat: cafeLat,
         lng: cafeLng
       };
@@ -427,7 +347,7 @@ function renderMapsLink(mapsUrl) {
     return "";
   }
 
-  return `<a class="maps-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">Open in Google Maps</a>`;
+  return `<a class="maps-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">Open in OpenStreetMap</a>`;
 }
 
 function displayCards(cafes) {
@@ -562,6 +482,8 @@ function saveCafe(cafe, options = {}) {
 }
 
 function showSaved() {
+  clearCafeMarkers();
+
   const container = getCardsContainer();
   const saved = JSON.parse(localStorage.getItem(SAVED_CAFES_KEY) || "[]");
 

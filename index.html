@@ -8,7 +8,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>C</text></svg>">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
   <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -72,6 +74,7 @@
           <p class="section-label">Cafe Cards</p>
           <h2>Nearby Cafes</h2>
         </div>
+        <div id="map" class="map-panel" aria-label="Nearby cafes map"></div>
         <div class="cards"></div>
         <div class="deck-actions">
           <button class="ghost-button" onclick="skipTopCard()">Skip</button>
@@ -91,11 +94,10 @@
 
         <div class="info-card">
           <p class="section-label">Extra Feature</p>
-          <h3>Add Google Maps for better data</h3>
+          <h3>Powered by free open data</h3>
           <p>
-            Add your API key in <code>script.js</code> if you want better photos,
-            ratings, and richer cafe details. Without it, the app still works with
-            basic open data.
+            This app uses OpenStreetMap tiles and Overpass data. No API key,
+            no paid service, just free community map data.
           </p>
         </div>
 

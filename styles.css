@@ -335,6 +335,17 @@ button:hover {
     margin-top: 20px;
 }
 
+.map-panel {
+    width: min(100%, 460px);
+    height: 300px;
+    margin-top: 20px;
+    border-radius: 24px;
+    border: 1px solid var(--line);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    background: rgba(255, 255, 255, 0.7);
+}
+
 .deck-actions {
     width: min(100%, 460px);
     margin-top: 16px;
@@ -491,6 +502,11 @@ code {
         width: 100%;
         max-width: 460px;
     }
+
+    .map-panel {
+        width: 100%;
+        max-width: 460px;
+    }
 }
 
 @media (max-width: 640px) {
@@ -516,6 +532,10 @@ code {
 
     .cards {
         height: 620px;
+    }
+
+    .map-panel {
+        height: 250px;
     }
 
     .stats-grid {
