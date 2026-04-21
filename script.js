@@ -1,5 +1,5 @@
 const GOOGLE_MAPS_API_KEY = "";
-const SEARCH_RADIUS = 5000;
+const SEARCH_RADIUS = 20000;
 const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse";
 const LOCATION_CACHE_KEY = "cachedLocation";
