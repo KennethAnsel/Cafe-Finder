@@ -177,7 +177,7 @@ function normalizeCafes(elements) {
       const photoAttribution = getPhotoAttribution(tags);
 
       return {
-        place_id: `${element.type}-${element.id}`,
+        cafeId: `${element.type}-${element.id}`,
         name: tags.name,
         address: addressParts.join(", "),
         rating: "",
@@ -488,12 +488,17 @@ function displayCards(cafes) {
   });
 }
 
+function getCafeId(cafe) {
+  return cafe?.cafeId || cafe?.place_id || "";
+}
+
 function dismissCard(wrapper, cafe, shouldSave) {
   if (shouldSave) {
     saveCafe(cafe, { silent: true });
   }
 
-  currentDeck = currentDeck.filter((item) => item.place_id !== cafe.place_id);
+  const targetId = getCafeId(cafe);
+  currentDeck = currentDeck.filter((item) => getCafeId(item) !== targetId);
   updateDeckCount();
   wrapper.style.transform = shouldSave
     ? "translateX(150%) rotate(12deg)"
@@ -558,14 +563,19 @@ function saveCafe(cafe, options = {}) {
   const { silent = false } = options;
   const saved = JSON.parse(localStorage.getItem(SAVED_CAFES_KEY) || "[]");
 
-  if (saved.find((item) => item.place_id === cafe.place_id)) {
+  const cafeId = getCafeId(cafe);
+
+  if (saved.find((item) => getCafeId(item) === cafeId)) {
     if (!silent) {
       setStatus(`${cafe.name} is already in your saved list.`);
     }
     return;
   }
 
-  saved.push(cafe);
+  saved.push({
+    ...cafe,
+    cafeId
+  });
   localStorage.setItem(SAVED_CAFES_KEY, JSON.stringify(saved));
   updateSavedCount();
   setStatus(`${cafe.name} was saved to your list.`);
@@ -590,6 +600,7 @@ function showSaved() {
   setStatus(`Showing ${saved.length} saved cafes.`);
 
   saved.forEach((cafe) => {
+    const cafeId = getCafeId(cafe);
     const card = document.createElement("article");
     card.className = "location-card saved-card";
     card.innerHTML = `
@@ -609,7 +620,7 @@ function showSaved() {
         </div>
         ${renderPhotoAttribution(cafe.photoAttribution)}
         <div class="saved-actions">
-          <button class="ghost-button small-button" onclick="removeSavedCafe('${cafe.place_id}')">Remove</button>
+          <button class="ghost-button small-button" onclick="removeSavedCafe('${cafeId}')">Remove</button>
         </div>
       </div>
     `;
@@ -617,9 +628,9 @@ function showSaved() {
   });
 }
 
-function removeSavedCafe(placeId) {
+function removeSavedCafe(cafeId) {
   const saved = JSON.parse(localStorage.getItem(SAVED_CAFES_KEY) || "[]");
-  const nextSaved = saved.filter((cafe) => cafe.place_id !== placeId);
+  const nextSaved = saved.filter((cafe) => getCafeId(cafe) !== cafeId);
 
   localStorage.setItem(SAVED_CAFES_KEY, JSON.stringify(nextSaved));
   updateSavedCount();
