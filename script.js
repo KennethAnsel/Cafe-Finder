@@ -1,13 +1,10 @@
-const GOOGLE_MAPS_API_KEY = "";
 const SEARCH_RADIUS = 20000;
 const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse";
+const WIKIDATA_ENTITY_URL = "https://www.wikidata.org/w/api.php";
 const LOCATION_CACHE_KEY = "cachedLocation";
 const SAVED_CAFES_KEY = "savedCafes";
 const LOCATION_CACHE_TTL = 10 * 60 * 1000;
-const GOOGLE_SCRIPT_ID = "google-maps-js";
-
-let googleMapsLoaderPromise;
 let currentSearchLocation = null;
 let currentDeck = [];
 let currentViewMode = "Ready";
@@ -63,10 +60,6 @@ function setViewMode(mode) {
   }
 }
 
-function hasGooglePlacesKey() {
-  return GOOGLE_MAPS_API_KEY.trim().length > 0;
-}
-
 function getSearchRadius() {
   return Number(getRadiusSelect()?.value || SEARCH_RADIUS);
 }
@@ -106,136 +99,7 @@ function getLocationCachedOrNew() {
 
 async function useLocation(lat, lng) {
   currentSearchLocation = { lat, lng };
-
-  if (hasGooglePlacesKey()) {
-    await useGooglePlaces(lat, lng);
-    return;
-  }
-
-  setStatus(
-    "Using basic fallback data. Add a Google Maps API key in script.js for better photos, addresses, and ratings.",
-    true
-  );
   await useOpenStreetMap(lat, lng);
-}
-
-async function useGooglePlaces(lat, lng) {
-  const container = getCardsContainer();
-  container.classList.remove("saved-view");
-  container.innerHTML = "";
-  setStatus("Finding nearby cafes with Google Maps...");
-  setViewMode("Live Search");
-  const radius = getSearchRadius();
-
-  try {
-    await loadGoogleMapsApi();
-    const { Place, SearchNearbyRankPreference } = await google.maps.importLibrary("places");
-
-    const request = {
-      fields: [
-        "id",
-        "displayName",
-        "formattedAddress",
-        "rating",
-        "userRatingCount",
-        "photos",
-        "googleMapsURI"
-      ],
-      locationRestriction: {
-        center: { lat, lng },
-        radius
-      },
-      includedPrimaryTypes: ["cafe"],
-      maxResultCount: 20,
-      rankPreference: SearchNearbyRankPreference.POPULARITY
-    };
-
-    const { places } = await Place.searchNearby(request);
-    const cafes = (places || []).map(normalizeGoogleCafe).filter(Boolean);
-
-    if (cafes.length === 0) {
-      currentDeck = [];
-      updateDeckCount();
-      setStatus("No cafes found in this area.");
-      setViewMode("No Results");
-      return;
-    }
-
-    currentDeck = cafes;
-    updateDeckCount();
-    setStatus(`Found ${cafes.length} cafes. Swipe right to save your favorites.`);
-    setViewMode("Browsing");
-    displayCards(cafes);
-  } catch (error) {
-    console.error("Error fetching Google Places data:", error);
-    setStatus("Google Maps data could not load, so basic cafe data is shown instead.", true);
-    setViewMode("Fallback");
-    await useOpenStreetMap(lat, lng);
-  }
-}
-
-function loadGoogleMapsApi() {
-  if (window.google?.maps?.importLibrary) {
-    return Promise.resolve();
-  }
-
-  if (!hasGooglePlacesKey()) {
-    return Promise.reject(new Error("Missing Google Maps API key"));
-  }
-
-  if (googleMapsLoaderPromise) {
-    return googleMapsLoaderPromise;
-  }
-
-  googleMapsLoaderPromise = new Promise((resolve, reject) => {
-    const existingScript = document.getElementById(GOOGLE_SCRIPT_ID);
-
-    if (existingScript) {
-      existingScript.addEventListener("load", resolve, { once: true });
-      existingScript.addEventListener(
-        "error",
-        () => reject(new Error("Failed to load Google Maps script")),
-        { once: true }
-      );
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.id = GOOGLE_SCRIPT_ID;
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}&v=weekly&libraries=places`;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Failed to load Google Maps script"));
-    document.head.appendChild(script);
-  });
-
-  return googleMapsLoaderPromise;
-}
-
-function normalizeGoogleCafe(place) {
-  if (!place?.id) {
-    return null;
-  }
-
-  const firstPhoto = place.photos?.[0];
-  const firstAttribution = firstPhoto?.authorAttributions?.[0];
-
-  return {
-    place_id: place.id,
-    name: place.displayName || "Cafe",
-    address: place.formattedAddress || "Address not available",
-    rating: typeof place.rating === "number" ? place.rating.toFixed(1) : "",
-    ratingCount: typeof place.userRatingCount === "number" ? place.userRatingCount : 0,
-    photo: firstPhoto ? firstPhoto.getURI({ maxHeight: 720, maxWidth: 1080 }) : "",
-    photoAttribution: firstAttribution
-      ? {
-          displayName: firstAttribution.displayName,
-          uri: firstAttribution.uri
-        }
-      : null,
-    mapsUrl: place.googleMapsURI || ""
-  };
 }
 
 async function useOpenStreetMap(lat, lng) {
@@ -253,8 +117,8 @@ async function useOpenStreetMap(lat, lng) {
   const container = getCardsContainer();
   container.classList.remove("saved-view");
   container.innerHTML = "";
-  setStatus("Finding cafes near you with basic fallback data...", true);
-  setViewMode("Fallback");
+  setStatus("Finding cafes near you with OpenStreetMap data...");
+  setViewMode("Live Search");
 
   try {
     const response = await fetch(OVERPASS_URL, {
@@ -270,7 +134,7 @@ async function useOpenStreetMap(lat, lng) {
     }
 
     const data = await response.json();
-    const cafes = await enrichCafes(normalizeFallbackCafes(data.elements || []));
+    const cafes = await enrichCafes(normalizeCafes(data.elements || []));
 
     if (cafes.length === 0) {
       currentDeck = [];
@@ -282,7 +146,7 @@ async function useOpenStreetMap(lat, lng) {
 
     currentDeck = cafes;
     updateDeckCount();
-    setStatus(`Found ${cafes.length} cafes. Add a Google Maps API key for better photos and ratings.`, true);
+    setStatus(`Found ${cafes.length} cafes. Swipe right to save your favorites.`);
     setViewMode("Browsing");
     displayCards(cafes);
   } catch (error) {
@@ -292,7 +156,7 @@ async function useOpenStreetMap(lat, lng) {
   }
 }
 
-function normalizeFallbackCafes(elements) {
+function normalizeCafes(elements) {
   const mapped = elements
     .map((element) => {
       const tags = element.tags || {};
@@ -309,17 +173,23 @@ function normalizeFallbackCafes(elements) {
         tags["addr:city"] || tags["addr:suburb"]
       ].filter(Boolean);
 
+      const photo = getCafeImageUrl(tags, tags.name);
+      const photoAttribution = getPhotoAttribution(tags);
+
       return {
         place_id: `${element.type}-${element.id}`,
         name: tags.name,
         address: addressParts.join(", "),
         rating: "",
         ratingCount: 0,
-        photo: getFallbackImageUrl(tags, tags.name),
-        photoAttribution: null,
-        mapsUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${cafeLat},${cafeLng}`)}`,
+        photo,
+        photoAttribution,
+        mapsUrl: `https://www.openstreetmap.org/?mlat=${encodeURIComponent(cafeLat)}&mlon=${encodeURIComponent(cafeLng)}#map=19/${encodeURIComponent(cafeLat)}/${encodeURIComponent(cafeLng)}`,
         lat: cafeLat,
-        lng: cafeLng
+        lng: cafeLng,
+        wikipediaTag: tags.wikipedia || "",
+        wikidataId: tags.wikidata || "",
+        wikimediaCommonsTag: tags.wikimedia_commons || ""
       };
     })
     .filter(Boolean);
@@ -338,7 +208,7 @@ function normalizeFallbackCafes(elements) {
   return unique.slice(0, 20);
 }
 
-function getFallbackImageUrl(tags, name) {
+function getCafeImageUrl(tags, name) {
   if (tags.image) {
     return tags.image;
   }
@@ -355,21 +225,161 @@ function getFallbackImageUrl(tags, name) {
   return `https://placehold.co/1080x720?text=${encodeURIComponent(name)}`;
 }
 
+function getPhotoAttribution(tags) {
+  if (!tags.wikimedia_commons) {
+    return null;
+  }
+
+  const normalizedFile = tags.wikimedia_commons.startsWith("File:")
+    ? tags.wikimedia_commons
+    : `File:${tags.wikimedia_commons}`;
+
+  return {
+    displayName: "Wikimedia Commons",
+    uri: `https://commons.wikimedia.org/wiki/${encodeURIComponent(normalizedFile.replace(/ /g, "_"))}`
+  };
+}
+
+function isPlaceholderImage(url) {
+  return typeof url === "string" && url.includes("placehold.co");
+}
+
 async function enrichCafes(cafes) {
   const enriched = await Promise.all(
     cafes.map(async (cafe) => {
-      if (cafe.address) {
-        return cafe;
-      }
+      const shouldResolveAddress = !cafe.address;
+      const shouldResolvePhoto = !cafe.photo || isPlaceholderImage(cafe.photo);
+
+      const [resolvedAddress, resolvedPhoto] = await Promise.all([
+        shouldResolveAddress ? fetchAddress(cafe.lat, cafe.lng) : Promise.resolve(cafe.address),
+        shouldResolvePhoto ? fetchOpenDataPhoto(cafe) : Promise.resolve(null)
+      ]);
 
       return {
         ...cafe,
-        address: await fetchAddress(cafe.lat, cafe.lng)
+        address: resolvedAddress || "Address not available",
+        photo: resolvedPhoto?.photo || cafe.photo,
+        photoAttribution: resolvedPhoto?.photoAttribution || cafe.photoAttribution
       };
     })
   );
 
   return enriched;
+}
+
+async function fetchOpenDataPhoto(cafe) {
+  const fromWikipedia = await fetchPhotoFromWikipediaTag(cafe.wikipediaTag);
+  if (fromWikipedia) {
+    return fromWikipedia;
+  }
+
+  const fromWikidata = await fetchPhotoFromWikidata(cafe.wikidataId);
+  if (fromWikidata) {
+    return fromWikidata;
+  }
+
+  if (cafe.wikimediaCommonsTag) {
+    const normalizedFile = cafe.wikimediaCommonsTag.replace(/^File:/i, "");
+    return {
+      photo: `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(normalizedFile)}`,
+      photoAttribution: {
+        displayName: "Wikimedia Commons",
+        uri: `https://commons.wikimedia.org/wiki/File:${encodeURIComponent(normalizedFile.replace(/ /g, "_"))}`
+      }
+    };
+  }
+
+  return null;
+}
+
+async function fetchPhotoFromWikipediaTag(wikipediaTag) {
+  if (!wikipediaTag) {
+    return null;
+  }
+
+  const separatorIndex = wikipediaTag.indexOf(":");
+  const language = separatorIndex > 0 ? wikipediaTag.slice(0, separatorIndex) : "en";
+  const rawTitle = separatorIndex > 0 ? wikipediaTag.slice(separatorIndex + 1) : wikipediaTag;
+  const title = rawTitle.trim().replace(/ /g, "_");
+
+  if (!title) {
+    return null;
+  }
+
+  try {
+    const url = `https://${language}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
+    const response = await fetch(url, {
+      headers: {
+        Accept: "application/json"
+      }
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json();
+    const imageUrl = data?.thumbnail?.source || data?.originalimage?.source;
+
+    if (!imageUrl) {
+      return null;
+    }
+
+    return {
+      photo: imageUrl,
+      photoAttribution: {
+        displayName: `${language}.wikipedia.org`,
+        uri: data?.content_urls?.desktop?.page || `https://${language}.wikipedia.org/wiki/${encodeURIComponent(title)}`
+      }
+    };
+  } catch (error) {
+    console.error("Error fetching image from Wikipedia:", error);
+    return null;
+  }
+}
+
+async function fetchPhotoFromWikidata(wikidataId) {
+  if (!wikidataId) {
+    return null;
+  }
+
+  try {
+    const params = new URLSearchParams({
+      action: "wbgetentities",
+      ids: wikidataId,
+      format: "json",
+      origin: "*"
+    });
+
+    const response = await fetch(`${WIKIDATA_ENTITY_URL}?${params.toString()}`, {
+      headers: {
+        Accept: "application/json"
+      }
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json();
+    const entity = data?.entities?.[wikidataId];
+    const imageName = entity?.claims?.P18?.[0]?.mainsnak?.datavalue?.value;
+
+    if (!imageName) {
+      return null;
+    }
+
+    return {
+      photo: `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(imageName)}`,
+      photoAttribution: {
+        displayName: "Wikimedia Commons",
+        uri: `https://commons.wikimedia.org/wiki/File:${encodeURIComponent(imageName.replace(/ /g, "_"))}`
+      }
+    };
+  } catch (error) {
+    console.error("Error fetching image from Wikidata:", error);
+    return null;
+  }
 }
 
 async function fetchAddress(lat, lng) {
@@ -427,7 +437,7 @@ function renderMapsLink(mapsUrl) {
     return "";
   }
 
-  return `<a class="maps-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">Open in Google Maps</a>`;
+  return `<a class="maps-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">Open in OpenStreetMap</a>`;
 }
 
 function displayCards(cafes) {
